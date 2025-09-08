@@ -4,12 +4,25 @@ import importlib
 import json
 import os
 import sys
+# 添加目录路径
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+# 将项目根目录放在最前，优先使用本地源码而不是已安装的同名包
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 import traceback
 import uuid
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from datetime import datetime
 from typing import Optional
+
+# 设置环境变量
+os.environ["OPENAI_API_KEY"] = "sk-7R6cfg7r756PxOU30735B1F3067c46D198EeAfFdE302023c"
+os.environ["API_BASE"] = "https://aihubmix.com/v1"
+os.environ["LANGUAGE_MODEL"] = "gpt-4o-mini"
+os.environ["VISION_MODEL"] = "gpt-4o-mini"
+os.environ["TEXT_MODEL"] = "text-embedding-3-small"
 
 from fastapi import (
     FastAPI,
@@ -34,7 +47,8 @@ from pptagent.utils import Config, get_logger, package_join, pjoin, ppt_to_image
 
 # constants
 DEBUG = True if len(sys.argv) == 1 else False
-RUNS_DIR = package_join("runs")
+# 使用仓库根目录下的 runs 目录，避免导入已安装包时指向包内
+RUNS_DIR = os.path.join(PROJECT_ROOT, "runs")
 STAGES = [
     "PPT Parsing",
     "PDF Parsing",
@@ -117,6 +131,13 @@ async def create_task(
         "numberOfPages": numberOfPages,
         "pptx": "default_template",
     }
+    
+    # Create default template directory if no PPTX file is uploaded
+    if pptxFile is None:
+        pptx_dir = pjoin(RUNS_DIR, "pptx", "default_template")
+        if not os.path.exists(pptx_dir):
+            os.makedirs(pptx_dir, exist_ok=True)
+    
     if pptxFile is not None:
         pptx_blob = await pptxFile.read()
         pptx_md5 = hashlib.md5(pptx_blob).hexdigest()
@@ -230,6 +251,17 @@ async def ppt_gen(task_id: str, rerun=False):
     )
 
     try:
+        # Handle default template case
+        if pptx_md5 == "default_template":
+            # Copy default template to the expected location (repo resource/templates)
+            default_template_path = os.path.join(PROJECT_ROOT, "resource", "templates", "default_template.pptx")
+            target_path = pjoin(pptx_config.RUN_DIR, "source.pptx")
+            if not os.path.exists(target_path):
+                import shutil
+                # Ensure the target directory exists
+                os.makedirs(pptx_config.RUN_DIR, exist_ok=True)
+                shutil.copy2(default_template_path, target_path)
+        
         # ppt parsing
         presentation = Presentation.from_file(
             pjoin(pptx_config.RUN_DIR, "source.pptx"), pptx_config
